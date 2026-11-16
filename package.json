@@ -1,6 +1,6 @@
 {
   "name": "tilbudstrolden-mcp",
-  "version": "0.5.3",
+  "version": "0.6.0-madturbot.1",
   "type": "module",
   "description": "MCP server for Nordic grocery deal hunting (Denmark, Norway, Sweden, Finland). Search offers, score recipes against current deals, and generate optimized shopping lists.",
   "author": "Olga Safonova",
@@ -54,7 +54,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
