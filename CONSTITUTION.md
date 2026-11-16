@@ -14,11 +14,11 @@ Written 27-08-2026 against `main` at `@modelcontextprotocol/sdk` ^1.30.0, 18 reg
 
 ## Article I: Tool registration is declarative, per-domain, and tested through the real path
 
-Adding a tool means one `server.registerTool(name, { description, inputSchema, annotations }, handler)` call inside the matching domain module in `src/tools/` (deals, household, recipes, scoring, shopping, tracking), whose `register*Tools` function `src/server.ts` calls once at startup (shape amended 27-08-2026 with Article XII; previously the deprecated 4-arg `server.tool` overload, which carried no annotations). Tests do not re-implement registration: `test/mcp-harness.ts` captures the same `registerTool` calls through a stub — annotations included — and its `callTool` parses raw arguments through `z.object(tool.schema)` — the same validation the SDK applies — before running the handler. The harness lives outside `src/` on purpose, so it never reaches `dist/` and Biome (scoped to `src/**`) never lints it.
+Adding a tool means one `server.registerTool(name, { description, inputSchema, annotations }, handler)` call inside the matching domain module in `src/tools/` (deals, household, recipes, scoring, shopping, tracking), whose `register*Tools` function `createServer` in `src/create-server.ts` calls once per server (amended 16-11-2026 with Article VIII; previously `src/server.ts` at startup) (shape amended 27-08-2026 with Article XII; previously the deprecated 4-arg `server.tool` overload, which carried no annotations). Tests do not re-implement registration: `test/mcp-harness.ts` captures the same `registerTool` calls through a stub — annotations included — and its `callTool` parses raw arguments through `z.object(tool.schema)` — the same validation the SDK applies — before running the handler. The harness lives outside `src/` on purpose, so it never reaches `dist/` and Biome (scoped to `src/**`) never lints it.
 
 Codifies: `src/server.ts`, `src/tools/*.ts` (each ends in a `register*Tools` function), `test/mcp-harness.ts`.
 
-**Enforcement: mechanically checked per module, with one hole.** `deals.test.ts` "registers the four deal tools", `household.test.ts:43` "registers the four household and pantry tools", `recipes.test.ts:50` "registers the three recipe tools", `tracking.test.ts:50` "registers the four tracking tools", all under `npm test` in CI. The hole: the tests import the register functions directly, so no test pins the total of 18 or fails if a `register*Tools` call is dropped from `src/server.ts`. That wiring rests on review.
+**Enforcement: mechanically checked.** `deals.test.ts` "registers the four deal tools", `household.test.ts:43` "registers the four household and pantry tools", `recipes.test.ts:50` "registers the three recipe tools", `tracking.test.ts:50` "registers the four tracking tools", all under `npm test` in CI. `src/create-server.test.ts` lists tools and prompts through a real MCP client and pins the totals of 18 and 3, so dropping a `register*Tools` call from `createServer` fails CI.
 
 ---
 
@@ -84,15 +84,17 @@ Codifies: `handleDealsThisWeek` in `src/tools/deals.ts`, `NO_RECIPES_TEXT` in `s
 
 ---
 
-## Article VIII: The data file is the only mutable state, and every write goes through the mutex
+## Article VIII: All mutable state goes through one store, and every write goes through the mutex
 
-All persistent state — household, pantry, recipes, meal history, spend log — lives in one JSON file at `~/.tilbudstrolden.json` (override: `TILBUDSTROLDEN_DATA`), validated with a Zod schema on every load. Every write goes through the async mutex in `src/store.ts`: `save` and `modify` wrap `withLock`, and `modify` is the read-modify-write path that keeps concurrent tool calls from corrupting the file. `saveRaw` is module-private; nothing else in `src/` calls `fs.writeFile` (verified). The data file is gitignored.
+All persistent state (household, pantry, recipes, meal history, spend log) is one `DataStore` value, persisted through a `StorageBackend` and validated with a Zod schema on every load. The default backend, `fileStorage`, writes one JSON file at `~/.tilbudstrolden.json` (override: `TILBUDSTROLDEN_DATA`). A host that has no disk, such as a serverless function, may supply its own backend through `createServer({ storage })` or `setStorageBackend`. Every write goes through the async mutex in `src/store.ts`: `save` and `modify` wrap `withLock`, and `modify` is the read-modify-write path that keeps concurrent tool calls from corrupting the store. `saveRaw` is module-private, and nothing else in `src/` calls `fs.writeFile` or a backend's `write`. The data file is gitignored.
 
-Stated honestly: when the file exists but fails schema validation, `loadRaw` logs the issues and returns an empty store, and the next save overwrites the corrupt file. Recovery here favours availability over preservation. That is the current, deliberate behaviour — this article records it so nobody mistakes the store for a preservation guarantee.
+The mutex is in-process. It serialises tool calls inside one server process, not across processes, so a backend shared by several processes owns its own consistency. The backend is process-wide: one process serves one household.
 
-Codifies: `src/store.ts` (`withLock`, `modify`, `DataStoreSchema`, `getStorePath`); `.gitignore` (`.tilbudstrolden.json`).
+Stated honestly: when stored data fails schema validation, `loadRaw` logs the issues and returns an empty store, and the next save overwrites it. Recovery here favours availability over preservation, for every backend. The default file backend also reads a missing or unparseable file as empty. A custom backend MUST throw when it cannot reach its storage instead of returning null, because null means "start empty" and the next write would replace real data.
 
-**Enforcement: none mechanical.** There is no `store.test.ts`; the tool test suites mock `store.js` entirely. The mutex discipline rests on `saveRaw` being unexported and on review.
+Codifies: `src/store.ts` (`StorageBackend`, `fileStorage`, `setStorageBackend`, `withLock`, `modify`, `DataStoreSchema`, `getStorePath`); `src/create-server.ts` (`createServer({ storage })`); `.gitignore` (`.tilbudstrolden.json`).
+
+**Enforcement: mechanically checked for the lock and the backend contract.** `src/store.test.ts` covers lost-update protection under concurrent writers, lock release after a throw, no write when the update function throws, routing through a custom backend, and a failing backend read that rejects with zero writes. That `saveRaw` stays private, and that nothing writes around the store, rests on review.
 
 ---
 
@@ -166,3 +168,4 @@ Codifies: the `annotations` object in every `server.registerTool` call across `s
 |------|--------|
 | 27-08-2026 | Ratified. Eleven articles, adapted from the `CONSTITUTION.md` in `gridctl/gridctl` (Apache-2.0, github.com/gridctl/gridctl) via the portfolio template, translated for TypeScript. |
 | 27-08-2026 | Article XII ratified: tool annotations moved from "considered and rejected" to an article, after all 18 registrations gained truthful `ToolAnnotations` (via `server.registerTool`) pinned by `src/tools/annotations.test.ts`. |
+| 16-11-2026 | Article VIII amended: state goes through a pluggable `StorageBackend`, with the JSON file as the default, so the server can run where there is no disk. Records that the mutex is in-process and that a custom backend must throw rather than read as empty. Article I updated to name `createServer` as the registration point and drops its recorded hole, now closed by `src/create-server.test.ts`. Takes effect with the pluggable-storage feature PR. |
