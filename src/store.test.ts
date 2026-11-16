@@ -1,5 +1,5 @@
 /**
- * Unit tests for src/store.ts — the JSON data store, its defaults, its path
+ * Unit tests for src/store.ts: the data store, its pluggable backend, its defaults, its path
  * resolution, and the lock that serialises read-modify-write cycles.
  *
  * Every test points TILBUDSTROLDEN_DATA (or a stubbed home directory) at a
@@ -42,6 +42,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  store.setStorageBackend(null);
   vi.restoreAllMocks();
   if (savedEnv === undefined) delete process.env[ENV];
   else process.env[ENV] = savedEnv;
@@ -208,5 +209,69 @@ describe("store operations built on the lock", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("custom storage backend", () => {
+  function memoryBackend(initial: unknown = null) {
+    const backend = {
+      value: initial,
+      writes: 0,
+      async read() {
+        return backend.value;
+      },
+      async write(data: store.DataStore) {
+        backend.writes++;
+        backend.value = structuredClone(data);
+      },
+    };
+    return backend;
+  }
+
+  it("reads and writes through the backend instead of the file", async () => {
+    const mem = memoryBackend();
+    store.setStorageBackend(mem);
+    await store.updatePantry(["salt"], []);
+    expect(mem.value).toMatchObject({ pantry: ["salt"] });
+    await expect(fs.access(dataFile)).rejects.toThrow();
+  });
+
+  it("treats a null read as an empty store", async () => {
+    store.setStorageBackend(memoryBackend(null));
+    expect(await store.load()).toEqual(EMPTY);
+  });
+
+  it("validates what the backend returns and fills defaults", async () => {
+    store.setStorageBackend(memoryBackend({ household: { country: "SE" } }));
+    expect((await store.load()).household).toEqual({
+      people: [],
+      stores: [],
+      defaultServings: 2,
+      country: "SE",
+    });
+  });
+
+  it("propagates a read failure instead of starting empty and overwriting", async () => {
+    const mem = memoryBackend({ ...EMPTY, pantry: ["peber"] });
+    mem.read = async () => {
+      throw new Error("db down");
+    };
+    store.setStorageBackend(mem);
+    await expect(store.updatePantry(["salt"], [])).rejects.toThrow("db down");
+    expect(mem.writes).toBe(0);
+  });
+
+  it("serialises concurrent writers through the backend", async () => {
+    store.setStorageBackend(memoryBackend());
+    const items = Array.from({ length: 10 }, (_, i) => `item-${i}`);
+    await Promise.all(items.map((item) => store.updatePantry([item], [])));
+    expect(await store.getPantry()).toEqual([...items].sort());
+  });
+
+  it("goes back to the file when reset with null", async () => {
+    store.setStorageBackend(memoryBackend());
+    store.setStorageBackend(null);
+    await store.save({ ...EMPTY, pantry: ["olie"] });
+    expect(await readData()).toMatchObject({ pantry: ["olie"] });
   });
 });

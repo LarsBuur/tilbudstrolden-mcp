@@ -1,4 +1,5 @@
-// Unified JSON data store for household, recipes, pantry, history, and spend tracking
+// Unified data store for household, recipes, pantry, history, and spend tracking.
+// Persisted through a StorageBackend, a JSON file by default.
 
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -151,13 +152,52 @@ function emptyStore(): DataStore {
   };
 }
 
-// --- File I/O with mutex ---
+// --- Storage backends ---
+
+/**
+ * Where the data store is persisted. The default writes a JSON file; a host
+ * such as a serverless function can supply its own (a database row, say).
+ *
+ * `read` returns the stored JSON value, or null when nothing has been stored
+ * yet. A backend that cannot reach its storage must throw rather than return
+ * null: null means "start empty", and the next write would overwrite real data.
+ */
+export interface StorageBackend {
+  read(): Promise<unknown>;
+  write(data: DataStore): Promise<void>;
+}
 
 function getStorePath(): string {
   const custom = process.env.TILBUDSTROLDEN_DATA;
   if (custom) return custom;
   return path.join(os.homedir(), ".tilbudstrolden.json");
 }
+
+/**
+ * The default backend: one JSON file at TILBUDSTROLDEN_DATA or
+ * ~/.tilbudstrolden.json. A missing or unparseable file reads as empty.
+ */
+export const fileStorage: StorageBackend = {
+  async read() {
+    try {
+      return JSON.parse(await fs.readFile(getStorePath(), "utf-8"));
+    } catch {
+      return null;
+    }
+  },
+  async write(data) {
+    await fs.writeFile(getStorePath(), JSON.stringify(data, null, 2), "utf-8");
+  },
+};
+
+let backend: StorageBackend = fileStorage;
+
+/** Replace the storage backend. Pass null to go back to the JSON file. */
+export function setStorageBackend(next: StorageBackend | null): void {
+  backend = next ?? fileStorage;
+}
+
+// --- Mutex ---
 
 // Simple async mutex to prevent concurrent read-modify-write corruption
 let lockPromise: Promise<void> = Promise.resolve();
@@ -172,23 +212,19 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 async function loadRaw(): Promise<DataStore> {
-  const filePath = getStorePath();
-  try {
-    const data = await fs.readFile(filePath, "utf-8");
-    const parsed = JSON.parse(data);
-    return DataStoreSchema.parse(parsed) as DataStore;
-  } catch (err) {
-    // If file doesn't exist, return empty. If validation fails, log and return empty.
-    if (err instanceof z.ZodError) {
-      console.error("Data file validation failed, starting fresh:", err.issues);
-    }
+  const raw = await backend.read();
+  if (raw === null || raw === undefined) return emptyStore();
+  const parsed = DataStoreSchema.safeParse(raw);
+  if (!parsed.success) {
+    // Validation failed: log and start fresh, as the file store always has.
+    console.error("Data file validation failed, starting fresh:", parsed.error.issues);
     return emptyStore();
   }
+  return parsed.data as DataStore;
 }
 
 async function saveRaw(data: DataStore): Promise<void> {
-  const filePath = getStorePath();
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+  await backend.write(data);
 }
 
 export async function load(): Promise<DataStore> {

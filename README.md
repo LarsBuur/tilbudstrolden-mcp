@@ -330,6 +330,27 @@ All data lives in a single JSON file: `~/.tilbudstrolden.json`. Override the pat
 
 Everything lives there: household config, recipes, pantry, meal history, and spend log. Created automatically on first use. No database, no cloud service, no account required.
 
+### Using it as a library
+
+The package also exports the server without a transport, so another Node app can host it. A serverless function, for example, has no disk to keep the JSON file on and can store the data elsewhere:
+
+```ts
+import { createServer, type StorageBackend } from "tilbudstrolden-mcp";
+
+const storage: StorageBackend = {
+  // Return the stored JSON, or null if nothing is stored yet.
+  // Throw if storage is unreachable. Returning null starts an empty store,
+  // and the next write would overwrite what was there.
+  read: async () => (await db.get("tilbudstrolden")) ?? null,
+  write: async (data) => db.set("tilbudstrolden", data),
+};
+
+const server = createServer({ storage });
+await server.connect(transport); // stdio, Streamable HTTP or in-memory
+```
+
+The backend is process-wide, so one process serves one household. Importing the package starts nothing. The stdio server runs only through the `tilbudstrolden-mcp` bin.
+
 ## Development
 
 ```bash

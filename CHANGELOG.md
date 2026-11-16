@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Pluggable storage.** `StorageBackend` is a `read()`/`write()` pair, and `setStorageBackend()` swaps it in. The JSON file stays the default, exported as `fileStorage`. Every read and write still goes through the existing mutex and Zod validation. A custom backend must throw when its storage is unreachable rather than return null, because null starts an empty store that the next write would save over real data. Tests in `src/store.test.ts` cover the failure case.
+- **`createServer({ storage })`.** It builds the server with every tool and prompt registered and connects no transport. `src/server.ts` is now only the stdio entry point, and `src/create-server.test.ts` drives the factory through a real MCP client over `InMemoryTransport`. That test also pins the total of 18 tools and 3 prompts, which no test checked before.
+- **A library entry point.** `main` and `exports` now point at `dist/index.js`, which exports `createServer`, the storage API and the data types. Importing the package no longer starts a stdio server. The `tilbudstrolden-mcp` bin and the Dockerfile still run `dist/server.js`.
+
+### Compatibility
+
+No tool names, schemas or behaviour change. Anyone who imported the package root to start the stdio server should run the `tilbudstrolden-mcp` bin or `dist/server.js` instead.
+
 ## [0.5.3] - 2026-09-25
 
 ### Added
