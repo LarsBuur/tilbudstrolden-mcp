@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - **`createServer({ storage })`.** It builds the server with every tool and prompt registered and connects no transport. `src/server.ts` is now only the stdio entry point, and `src/create-server.test.ts` drives the factory through a real MCP client over `InMemoryTransport`. That test also pins the total of 18 tools and 3 prompts, which no test checked before.
 - **A library entry point.** `main` and `exports` now point at `dist/index.js`, which exports `createServer`, the storage API and the data types. Importing the package no longer starts a stdio server. The `tilbudstrolden-mcp` bin and the Dockerfile still run `dist/server.js`.
 
+### Fixed
+
+- **`search_deals` and `get_store_offers` failed with "API request failed (400)" for larger limits.** The etilbudsavis API rejects any `limit` above 100. `search_deals` asks for three times its `limit` to survive filtering, so every call with `limit` above 33 failed, and `get_store_offers` failed above 100. Both now cap the request at 100 (`API_MAX_LIMIT` in `src/api.ts`). Tests in `src/api.test.ts` pin the cap.
+
 ### Compatibility
 
 No tool names, schemas or behaviour change. Anyone who imported the package root to start the stdio server should run the `tilbudstrolden-mcp` bin or `dist/server.js` instead.

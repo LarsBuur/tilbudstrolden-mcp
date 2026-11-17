@@ -16,6 +16,14 @@ export type { Dealer, Offer } from "./offer-parsing.js";
 
 const BASE_URL = "https://api.etilbudsavis.dk/v2";
 
+/** The API answers 400 to any request with a limit above 100. */
+export const API_MAX_LIMIT = 100;
+
+/** Clamp a requested page size to what the API accepts. */
+function apiLimit(n: number): string {
+  return String(Math.max(1, Math.min(Math.floor(n), API_MAX_LIMIT)));
+}
+
 /** Which national catalogue a request applies to. Defaults to Denmark. */
 export interface CountryScope {
   country?: string;
@@ -70,7 +78,7 @@ export async function searchDeals(search: DealSearch): Promise<Offer[]> {
   // Request extra to compensate for filtering non-matching results
   const params = new URLSearchParams({
     query: search.query,
-    limit: String(limit * 3),
+    limit: apiLimit(limit * 3),
     country_id: country,
   });
   if (search.dealerIds?.length) params.set("dealer_ids", search.dealerIds.join(","));
@@ -99,7 +107,7 @@ export async function searchDeals(search: DealSearch): Promise<Offer[]> {
 export async function getStoreOffers(query: StoreOffersQuery): Promise<Offer[]> {
   const params = new URLSearchParams({
     dealer_id: query.dealerId,
-    limit: String(query.limit ?? 50),
+    limit: apiLimit(query.limit ?? 50),
   });
   const raw = await fetchJson<RawOffer[]>(`${BASE_URL}/offers?${params}`);
   return raw.map(parseOffer);

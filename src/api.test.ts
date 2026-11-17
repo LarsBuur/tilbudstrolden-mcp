@@ -67,3 +67,24 @@ describe("listStores paging", () => {
     expect(urls).toHaveLength(3);
   });
 });
+
+describe("API page size", () => {
+  it("caps the overfetch at the API's limit of 100", async () => {
+    const urls = stubFetch();
+    await searchDeals({ query: "kylling", country: "SE", limit: 50 });
+    expect(new URL(urls[0]).searchParams.get("limit")).toBe("100");
+  });
+
+  it("still overfetches three times a small limit", async () => {
+    const urls = stubFetch();
+    await searchDeals({ query: "kylling", country: "SE", limit: 10 });
+    expect(new URL(urls[0]).searchParams.get("limit")).toBe("30");
+  });
+
+  it("caps a store catalogue request at 100", async () => {
+    const urls = stubFetch();
+    const { getStoreOffers } = await import("./api.js");
+    await getStoreOffers({ dealerId: "71c90", limit: 500 });
+    expect(new URL(urls[0]).searchParams.get("limit")).toBe("100");
+  });
+});
