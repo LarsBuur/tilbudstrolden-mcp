@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`search_deals` and `get_store_offers` failed with "API request failed (400)" for larger limits.** The etilbudsavis API rejects any `limit` above 100. `search_deals` asks for three times its `limit` to survive filtering, so every call with `limit` above 33 failed, and `get_store_offers` failed above 100. Both now cap the request at 100 (`API_MAX_LIMIT` in `src/api.ts`). Tests in `src/api.test.ts` pin the cap.
+
 ## [0.5.3] - 2026-09-25
 
 ### Added
